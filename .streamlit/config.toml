@@ -1,11 +1,15 @@
+# Streamlit's own theme, set to match the design so the app looks right
+# even in the split second before our stylesheet loads.
 [theme]
 base = "light"
-primaryColor = "#167C8D"
-backgroundColor = "#F4F7F9"
-secondaryBackgroundColor = "#FFFFFF"
-textColor = "#172B36"
-font = "sans-serif"
+primaryColor = "#15171A"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F7F7F5"
+textColor = "#15171A"
+font = "sans serif"
 
 [server]
-headless = true
+maxUploadSize = 200
 
+[browser]
+gatherUsageStats = false
