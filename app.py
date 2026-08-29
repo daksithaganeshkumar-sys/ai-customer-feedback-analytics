@@ -38,8 +38,16 @@ st.set_page_config(
 # st.html injects raw HTML without a markdown pass — see app_style.css()
 st.html(css())
 
-STEPS = [("choose", "Choose data"), ("check", "Check it"),
-         ("topics", "Confirm topics"), ("run", "Analyze"), ("dashboard", "Dashboard")]
+# Two different journeys, so two different step rails.
+#
+# An uploaded file really does get checked and really does need its topic list
+# confirmed, so it walks all five. A prepared dataset has already been through
+# both — months ago, offline — so showing it those steps as "skipped" makes a
+# finished job look broken. It gets a rail that describes what actually happens.
+UPLOAD_STEPS = [("choose", "Choose data"), ("check", "Check it"),
+                ("topics", "Confirm topics"), ("run", "Analyze"), ("dashboard", "Dashboard")]
+
+PREPARED_STEPS = [("choose", "Choose data"), ("run", "Open it"), ("dashboard", "Dashboard")]
 
 
 # One step back from each screen. The dashboard goes back to the dataset picker
@@ -130,10 +138,11 @@ def header(right: str = "NO API KEY REQUIRED"):
 
 def rail(active: str):
     """The step indicator. Steps before the active one show a tick."""
-    keys = [k for k, _ in STEPS]
+    steps = UPLOAD_STEPS if st.session_state.upload is not None else PREPARED_STEPS
+    keys = [k for k, _ in steps]
     idx = keys.index(active) if active in keys else 0
     out = ["<div class='rail'>"]
-    for i, (k, label) in enumerate(STEPS):
+    for i, (k, label) in enumerate(steps):
         cls = "on" if i == idx else ("done" if i < idx else "")
         mark = "✓" if i < idx else str(i + 1)
         out.append(f"<div class='s {cls}'><div class='b'>{mark}</div>{label}</div>")
@@ -398,6 +407,15 @@ def screen_dashboard():
         sentiments = st.multiselect("Sentiment", D.SENTIMENTS, default=D.SENTIMENTS,
                                     format_func=str.title)
         topics = st.multiselect("Topics", sorted(D.taxonomy(key)), default=[])
+
+        # Only some datasets carry a column worth slicing by — the airline on the
+        # ticket, the Echo model reviewed. The filter appears only where there is
+        # one, rather than sitting there greyed out on the datasets without.
+        segments = None
+        if spec["segment"]:
+            segments = st.multiselect(spec["segment_label"],
+                                      sorted(df["segment"].unique()), default=[])
+
         search = st.text_input("Search text", placeholder="e.g. refund")
         rng = None
         if df["rating"].notna().any():
@@ -407,7 +425,7 @@ def screen_dashboard():
         if st.button("Choose another dataset", type="secondary", use_container_width=True):
             go("choose")
 
-    view = D.apply_filters(df, sentiments, topics, search, rng)
+    view = D.apply_filters(df, sentiments, topics, search, rng, segments)
 
     # A clicked topic or keyword narrows everything below it, so the sentiment
     # split and the charts describe that slice rather than the whole dataset.

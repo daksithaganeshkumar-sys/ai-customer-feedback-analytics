@@ -188,8 +188,10 @@ def random_key(exclude: str | None = None) -> str:
 # ---------------------------------------------------------------------------
 # Filtering and aggregation — everything the dashboard draws comes from here.
 # ---------------------------------------------------------------------------
-def apply_filters(df, sentiments, topics, search, rating_range) -> pd.DataFrame:
+def apply_filters(df, sentiments, topics, search, rating_range, segments=None) -> pd.DataFrame:
     out = df[df["sentiment"].isin(sentiments or [])]
+    if segments:
+        out = out[out["segment"].isin(segments)]
     if topics:
         pattern = "|".join(pd.Series(topics).str.replace(r"([.^$*+?()\[\]{}|\\])", r"\\\1", regex=True))
         out = out[out["categories"].str.contains(pattern, case=False, na=False, regex=True)]
