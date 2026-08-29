@@ -10,16 +10,17 @@ on it:
 
     landing -> why -> choose -> [check -> topics -> run] -> dashboard
 
-The bracketed steps only happen for an uploaded file. Opening a prepared
-dataset goes straight to the dashboard, because the labeling was done offline
-months ago and the answers are already on disk — which is what makes exploring
-this tool free and instant.
+An uploaded file walks the whole path. A prepared dataset jumps from "choose"
+to "run" and then to the dashboard, because the labeling was done offline months
+ago and the answers are already on disk — which is what makes exploring this
+tool free and instant.
 """
 
 from __future__ import annotations
 
 import html
 import os
+import time
 
 import pandas as pd
 import streamlit as st
@@ -27,13 +28,24 @@ import streamlit as st
 import app_data as D
 from app_style import INK, INK_SOFT, MUTED, PANEL, RULE, css
 
-st.set_page_config(page_title="CSAT Analyzer", page_icon="📊",
-                   layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(
+    page_title="CSAT Analyzer", page_icon="📊", layout="wide",
+    # The filters live in the sidebar, so on the dashboard it has to start open.
+    # Left collapsed, every screen before it gets a clean full-width page.
+    initial_sidebar_state=("expanded" if st.session_state.get("step") == "dashboard"
+                           else "collapsed"),
+)
 # st.html injects raw HTML without a markdown pass — see app_style.css()
 st.html(css())
 
 STEPS = [("choose", "Choose data"), ("check", "Check it"),
          ("topics", "Confirm topics"), ("run", "Analyze"), ("dashboard", "Dashboard")]
+
+
+# One step back from each screen. The dashboard goes back to the dataset picker
+# whichever way you reached it, because that is the choice you'd want to change.
+PREVIOUS = {"why": "landing", "choose": "why", "check": "choose",
+            "topics": "check", "run": "topics", "dashboard": "choose"}
 
 ROTATING = [
     "Transform thousands of customer survey responses into actionable, AI powered summaries",
@@ -65,6 +77,15 @@ def state(k, default=None):
 
 
 def go(step: str):
+    """
+    Move to a screen.
+
+    The whole app lives at one URL, so the browser's own back button has nothing
+    to go back to — pressing it leaves the app and you return to the first
+    screen. Every screen therefore carries its own back control, and the
+    dashboard ends with somewhere to go next. See back_link() and the panel at
+    the foot of the dashboard.
+    """
     st.session_state.step = step
     st.rerun()
 
@@ -72,12 +93,27 @@ def go(step: str):
 state("step", "landing")
 state("dataset", None)
 state("upload", None)
+state("opened", None)   # the dataset the waiting screen has already opened
+state("focus", None)          # a topic or keyword the whole dashboard is narrowed to
+
 
 
 # ---------------------------------------------------------------------------
 # shared chrome
 # ---------------------------------------------------------------------------
+def back_link():
+    """A one-step-back control, for people who don't reach for the browser's."""
+    prev = PREVIOUS.get(st.session_state.step)
+    # The waiting screen sits in two different paths, so where "back" goes
+    # depends on which one you're in.
+    if st.session_state.step == "run":
+        prev = "choose" if st.session_state.dataset else "topics"
+    if prev and st.button("← Back", type="tertiary", key=f"back_{st.session_state.step}"):
+        go(prev)
+
+
 def header(right: str = "NO API KEY REQUIRED"):
+    back_link()
     left, rt = st.columns([3, 2])
     with left:
         st.markdown(
@@ -211,7 +247,8 @@ def screen_choose():
                     unsafe_allow_html=True)
         if st.button("Open dataset", use_container_width=True, disabled=choice is None):
             st.session_state.dataset = choice
-            go("dashboard")
+            st.session_state.focus = None
+            go("run")
 
     with c2, st.container(border=True):
         st.markdown("<div class='card-title'>Pick one for me</div>"
@@ -223,8 +260,9 @@ def screen_choose():
                     unsafe_allow_html=True)
         st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
         if st.button("Surprise me", type="secondary", use_container_width=True):
-            st.session_state.dataset = D.random_key()
-            go("dashboard")
+            st.session_state.dataset = D.random_key(exclude=st.session_state.dataset)
+            st.session_state.focus = None
+            go("run")
 
     with c3, st.container(border=True):
         st.markdown("<div class='card-title'>Upload your own</div>"
@@ -262,18 +300,79 @@ def screen_check():
 
 
 def screen_run():
+    """
+    The waiting screen, with the ten facts about how the tool was built.
+
+    Two ways to arrive here. An uploaded file waits for real, while every row is
+    sent to the model. A prepared dataset waits only as long as it takes to read
+    the CSV and build the counts — usually a second or two — so this screen holds
+    for a short minimum instead, long enough to read a fact. It never claims to
+    be labeling anything: the wording says "opening", because that is all it is.
+    """
     header()
     rail("run")
+    key = st.session_state.dataset
     st.markdown("<div class='eyebrow'>While you wait — how this was built</div>",
                 unsafe_allow_html=True)
     st.markdown("<div class='rot10'>" + "".join(f"<p>{f}</p>" for f in FACTS) + "</div>",
                 unsafe_allow_html=True)
 
+    if key is None:                       # upload path — nothing to open yet
+        return
+
+    # Arriving here a second time means the browser's back button brought us
+    # from the dashboard. Loading again would bounce straight forward and the
+    # back button would look broken, so go to the picker instead.
+    if st.session_state.get("opened") == key:
+        st.session_state.opened = None
+        go("choose")
+
+    spec = D.DATASETS[key]
+    st.markdown(f"<div class='section-title'>Opening {html.escape(spec['label'])}</div>",
+                unsafe_allow_html=True)
+    meter = st.progress(0.0)
+
+    started = time.time()
+    df = D.load(key)                      # the real work: read, clean, cache
+    D.taxonomy(key)
+    MINIMUM = 4.5                         # seconds, so a fact is readable
+    while (elapsed := time.time() - started) < MINIMUM:
+        meter.progress(min(elapsed / MINIMUM, 1.0))
+        time.sleep(0.08)
+    meter.progress(1.0)
+
+    st.markdown(f"<p class='small-note'>{len(df):,} labeled reviews ready.</p>",
+                unsafe_allow_html=True)
+    st.session_state.opened = key
+    go("dashboard")
+
 
 # ---------------------------------------------------------------------------
 # screen 6 — dashboard
 # ---------------------------------------------------------------------------
-def bar(shares: dict, height="72px", labels=True) -> str:
+def legend() -> str:
+    """The three sentiment colours, named. Without this the bar is just colours."""
+    return ("<div style='display:flex;gap:1.1rem;justify-content:flex-end;'>" + "".join(
+        f"<span style='display:flex;align-items:center;gap:.35rem;font-size:14px;'>"
+        f"<span style='width:10px;height:10px;border-radius:2px;"
+        f"background:{D.SENTIMENT_COLOR[s]};'></span>{s.title()}</span>"
+        for s in D.SENTIMENTS) + "</div>")
+
+
+def focus_on(kind: str, value: str):
+    """Narrow the whole dashboard to one topic or keyword."""
+    st.session_state.focus = {"kind": kind, "value": value}
+    st.rerun()
+
+
+def bar(shares: dict, height="72px", labels=True, radius="10px") -> str:
+    """
+    The stacked sentiment bar.
+
+    The corner radius is passed in rather than fixed, because a 10px radius on a
+    14px-tall bar rounds it into a pill and the segment widths stop being
+    readable. Small bars get a small radius.
+    """
     parts = []
     for s in ["negative", "mixed", "positive"]:
         pct = shares.get(s, 0) * 100
@@ -281,7 +380,8 @@ def bar(shares: dict, height="72px", labels=True) -> str:
             continue
         text = f"{pct:.0f}%" if labels and pct >= 9 else ""
         parts.append(f"<div style='width:{pct:.2f}%;background:{D.SENTIMENT_COLOR[s]};'>{text}</div>")
-    return f"<div class='sbar' style='height:{height};'>" + "".join(parts) + "</div>"
+    return (f"<div class='sbar' style='height:{height};border-radius:{radius};'>"
+            + "".join(parts) + "</div>")
 
 
 def screen_dashboard():
@@ -309,24 +409,53 @@ def screen_dashboard():
 
     view = D.apply_filters(df, sentiments, topics, search, rng)
 
+    # A clicked topic or keyword narrows everything below it, so the sentiment
+    # split and the charts describe that slice rather than the whole dataset.
+    focus = st.session_state.focus
+    if focus:
+        view = D.apply_focus(view, focus["kind"], focus["value"])
+
     header(f"{len(df):,} reviews analyzed")
     st.markdown(f"<h1 class='hero-title' style='font-size:40px;margin-bottom:.4rem;'>"
-                f"{html.escape(spec['label'])}</h1>"
-                f"<p class='section-note' style='font-size:19px;'>"
+                f"{html.escape(spec['label'])}</h1>", unsafe_allow_html=True)
+
+    if focus:
+        chip, clear = st.columns([4, 1])
+        with chip:
+            st.markdown(
+                f"<div style='display:inline-flex;align-items:center;gap:.5rem;"
+                f"background:{INK};color:#FFF;border-radius:999px;"
+                f"padding:.4rem 1rem;font-size:15px;font-weight:600;'>"
+                f"{focus['kind'].title()}: {html.escape(focus['value'])}</div>",
+                unsafe_allow_html=True)
+        with clear:
+            if st.button("Clear filter", type="secondary", use_container_width=True):
+                st.session_state.focus = None
+                st.rerun()
+        st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
+
+    st.markdown(f"<p class='section-note' style='font-size:19px;'>"
                 f"{len(view):,} of {len(df):,} reviews match your filters.</p>",
                 unsafe_allow_html=True)
 
     if len(view) == 0:
         st.warning("No reviews match these filters.", icon="⚠️")
+        if st.button("Clear the filters", type="secondary"):
+            st.session_state.focus = None
+            st.rerun()
         return
 
     # ---- overall sentiment ----
     shares = D.sentiment_share(view)
     with st.container(border=True):
-        st.markdown("<div class='section-title'>Overall sentiment</div>"
-                    f"<p class='section-note'>Share of the {len(view):,} reviews in view</p>",
-                    unsafe_allow_html=True)
-        st.markdown(bar(shares), unsafe_allow_html=True)
+        t, lg = st.columns([2, 1])
+        with t:
+            st.markdown("<div class='section-title'>Overall sentiment</div>"
+                        f"<p class='section-note'>Share of the {len(view):,} reviews in view</p>",
+                        unsafe_allow_html=True)
+        with lg:
+            st.markdown(legend(), unsafe_allow_html=True)
+        st.markdown(bar(shares, height="48px"), unsafe_allow_html=True)
         counts = view["sentiment"].value_counts()
         st.markdown(
             "<div style='display:flex;gap:2.2rem;margin-top:.8rem;font-size:15px;color:#7B8085;'>"
@@ -341,71 +470,50 @@ def screen_dashboard():
         st.markdown("<div class='section-title'>Sentiment by topic</div>"
                     "<p class='section-note'>Sorted by how negative each topic runs</p>",
                     unsafe_allow_html=True)
+        st.markdown("<p class='small-note' style='margin:-.7rem 0 1rem;'>"
+                    "Click a topic to narrow the whole dashboard to it.</p>",
+                    unsafe_allow_html=True)
         for _, r in D.topic_breakdown(view).iterrows():
+            topic = str(r["topic"])
             neg = r["negative"] * 100
             colour = D.SENTIMENT_COLOR["negative"] if neg >= 60 else INK_SOFT
-            st.markdown(
-                f"<div style='display:flex;justify-content:space-between;align-items:baseline;"
-                f"margin:0 0 .35rem;'><span style='font-size:16px;font-weight:500;'>"
-                f"{html.escape(str(r['topic']))}</span>"
-                f"<span style='font-size:14px;font-weight:700;color:{colour};'>"
-                f"{neg:.0f}% neg · {int(r['n'])}</span></div>"
-                + bar({s: r[s] for s in D.SENTIMENTS}, height="24px", labels=False)
-                + "<div style='height:.85rem'></div>", unsafe_allow_html=True)
+            nm, pc = st.columns([3, 1.15])
+            with nm:
+                if st.button(topic, key=f"topic_{topic}", type="tertiary"):
+                    focus_on("topic", topic)
+            with pc:
+                st.markdown(f"<div style='text-align:right;font-size:16px;font-weight:700;"
+                            f"color:{colour};padding-top:.5rem;'>{neg:.0f}% neg · "
+                            f"{int(r['n'])}</div>", unsafe_allow_html=True)
+            st.markdown(bar({s: r[s] for s in D.SENTIMENTS}, height="14px",
+                            labels=False, radius="4px")
+                        + "<div style='height:1rem'></div>", unsafe_allow_html=True)
 
     with right:
-        # ---- what moves the rating ----
-        eff = D.rating_effect(view)
-        with st.container(border=True):
-            if len(eff):
-                st.markdown("<div class='section-title'>What moves the rating</div>"
-                            f"<p class='section-note'>Average score when a topic is mentioned, "
-                            f"against the {view['rating'].mean():.1f} baseline</p>",
-                            unsafe_allow_html=True)
-                span = max(eff["delta"].abs().max(), 0.1)
-                for _, r in eff.iterrows():
-                    d = r["delta"]
-                    w = abs(d) / span * 46
-                    col = D.SENTIMENT_COLOR["positive"] if d > 0 else D.SENTIMENT_COLOR["negative"]
-                    side = (f"left:50%;width:{w:.1f}%;border-radius:0 6px 6px 0;" if d > 0
-                            else f"right:50%;width:{w:.1f}%;border-radius:6px 0 0 6px;")
-                    st.markdown(
-                        f"<div style='display:flex;align-items:center;gap:.8rem;margin-bottom:.6rem;'>"
-                        f"<span style='font-size:15px;width:150px;flex-shrink:0;'>"
-                        f"{html.escape(str(r['topic']))}</span>"
-                        f"<div style='flex-grow:1;position:relative;height:20px;'>"
-                        f"<div style='position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;"
-                        f"background:#D8D8D3;'></div>"
-                        f"<div style='position:absolute;{side}height:20px;background:{col};'></div></div>"
-                        f"<span style='font-size:15px;font-weight:700;width:54px;text-align:right;'>"
-                        f"{d:+.1f}</span></div>", unsafe_allow_html=True)
-                st.markdown("<p class='small-note' style='margin-top:.6rem;'>Ratings come from "
-                            "customers, not from the model — so this checks the model's reading "
-                            "against something independent of it.</p>", unsafe_allow_html=True)
-            else:
-                st.markdown("<div class='section-title'>What moves the rating</div>"
-                            "<p class='section-note'>This dataset has no customer rating column, "
-                            "so there is nothing independent to check the model against here.</p>",
-                            unsafe_allow_html=True)
-
-        st.markdown("<div style='height:1.2rem'></div>", unsafe_allow_html=True)
-
         # ---- keywords ----
         with st.container(border=True):
             st.markdown("<div class='section-title'>Most-repeated phrases</div>"
                         "<p class='section-note'>Pulled from the reviews themselves</p>",
                         unsafe_allow_html=True)
-            kw = D.keyword_counts(view)
+            st.markdown("<p class='small-note' style='margin:-.7rem 0 1rem;'>"
+                        "Click a phrase to narrow the whole dashboard to it.</p>",
+                        unsafe_allow_html=True)
+            kw = D.keyword_counts(view, limit=14)
             top = kw["n"].max() if len(kw) else 1
             for _, r in kw.iterrows():
-                st.markdown(
-                    f"<div style='display:flex;align-items:center;gap:.8rem;margin-bottom:.55rem;'>"
-                    f"<span style='font-size:15px;width:170px;flex-shrink:0;'>"
-                    f"{html.escape(str(r['keyword']))}</span>"
-                    f"<div style='height:16px;background:{INK};border-radius:999px;"
-                    f"width:{r['n']/top*100:.1f}%;'></div>"
-                    f"<span style='font-size:14px;color:{MUTED};'>{int(r['n'])}</span></div>",
-                    unsafe_allow_html=True)
+                word = str(r["keyword"])
+                nm, bx = st.columns([1.15, 1])
+                with nm:
+                    if st.button(word, key=f"kw_{word}", type="tertiary"):
+                        focus_on("keyword", word)
+                with bx:
+                    st.markdown(
+                        f"<div style='display:flex;align-items:center;gap:.7rem;"
+                        f"padding-top:.75rem;'>"
+                        f"<div style='height:14px;background:{INK};border-radius:999px;"
+                        f"width:{r['n']/top*82:.1f}%;'></div>"
+                        f"<span style='font-size:15px;color:{MUTED};'>{int(r['n'])}</span></div>",
+                        unsafe_allow_html=True)
 
     # ---- the reviews ----
     st.markdown("<div style='height:1.4rem'></div>", unsafe_allow_html=True)
@@ -441,9 +549,29 @@ def screen_dashboard():
         st.markdown(f"<p class='small-note'>Showing {min(12, len(shown))} of {len(shown):,} "
                     f"matching reviews.</p>", unsafe_allow_html=True)
 
-    st.download_button("Download labeled CSV", view.to_csv(index=False).encode(),
-                       file_name=f"{key}_labeled_filtered.csv", mime="text/csv",
-                       type="secondary")
+    # ---- the end of the road ----
+    # The dashboard is the last screen, so it has to offer somewhere to go next
+    # rather than just stopping.
+    st.markdown("<div style='height:2rem'></div>", unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown("<div class='card-title'>That's this dataset.</div>"
+                    "<p class='card-body'>Take the labeled rows with you, or open "
+                    "another one — each has its own topics and its own story.</p>",
+                    unsafe_allow_html=True)
+        a, b, c = st.columns(3)
+        with a:
+            st.download_button("Download labeled CSV", view.to_csv(index=False).encode(),
+                               file_name=f"{key}_labeled_filtered.csv", mime="text/csv",
+                               type="secondary", use_container_width=True)
+        with b:
+            if st.button("Analyze another dataset", use_container_width=True):
+                st.session_state.focus = None
+                go("choose")
+        with c:
+            if st.button("Back to the start", type="secondary", use_container_width=True):
+                for k in ("dataset", "upload", "focus"):
+                    st.session_state[k] = None
+                go("landing")
 
 
 # ---------------------------------------------------------------------------

@@ -73,7 +73,7 @@ p, li, label, span, div {{ color: {INK}; }}
 /* ---------- buttons: black pills ---------- */
 .stButton > button {{
   background: {INK}; color: #FFFFFF; border: none; border-radius: 999px;
-  padding: 0.85rem 2.1rem; font-size: 1rem; font-weight: 600;
+  padding: 1.05rem 2.4rem; font-size: 1.12rem; font-weight: 600;
   transition: opacity .15s ease;
 }}
 .stButton > button:hover {{ background: {INK}; color: #FFFFFF; opacity: .86; }}
@@ -82,6 +82,31 @@ p, li, label, span, div {{ color: {INK}; }}
   background: #FFFFFF; color: {INK}; border: 1px solid {RULE_STRONG};
 }}
 .stButton > button[kind="secondary"]:hover {{ background: {PANEL}; color: {INK}; }}
+
+/* Tertiary buttons are the clickable topic and keyword names on the dashboard.
+   They have to read as part of the chart, not as buttons sitting on top of it —
+   so they lose the pill entirely and behave like a heading you can press. */
+.stButton > button[kind="tertiary"] {{
+  background: transparent; color: {INK}; border: none; padding: 0.3rem 0;
+  font-size: 17px; font-weight: 500; text-align: left; justify-content: flex-start;
+}}
+.stButton > button[kind="tertiary"]:hover {{
+  background: transparent; color: {INK}; opacity: 1; text-decoration: underline;
+  text-underline-offset: 3px;
+}}
+.stButton > button[kind="tertiary"] p {{ font-size: 17px; font-weight: 500; }}
+
+/* sidebar filters, sized to match the rest */
+[data-testid="stSidebar"] label p {{ font-size: 15px !important; font-weight: 600; }}
+
+/* The selected filters are black pills, and each pill wraps its label in a
+   second span. The blanket "span is dark ink" rule further up catches that
+   inner span and paints black text on the black pill, so the filters look
+   empty. These two rules put the label back. */
+span[data-tag] {{ border-radius: 999px !important; }}
+span[data-tag] span, span[data-tag] button, span[data-tag] svg {{
+  color: #FFFFFF !important; font-size: 14px !important;
+}}
 
 /* ---------- inputs ---------- */
 div[data-baseweb="select"] > div, .stTextInput input, .stNumberInput input {{
@@ -104,31 +129,31 @@ div[data-testid="stVerticalBlockBorderWrapper"] {{
 
 /* ---------- our own bits ---------- */
 .eyebrow {{
-  font-size: 13px; font-weight: 600; color: {MUTED};
+  font-size: 14px; font-weight: 600; color: {MUTED};
   letter-spacing: 0.13em; text-transform: uppercase; margin-bottom: 0.4rem;
 }}
 .hero-title {{ font-size: 54px; line-height: 1.06; font-weight: 700; letter-spacing: -0.028em; margin: 0 0 1.1rem; }}
-.hero-sub   {{ font-size: 19.5px; line-height: 1.6; color: {INK_SOFT}; margin: 0 0 2rem; max-width: 54ch; }}
-.section-title {{ font-size: 21px; font-weight: 600; letter-spacing: -0.014em; margin: 0 0 0.15rem; }}
-.section-note  {{ font-size: 15px; color: {MUTED}; margin: 0 0 1.2rem; }}
-.card-title {{ font-size: 24px; font-weight: 600; letter-spacing: -0.012em; margin: 0.5rem 0 0.4rem; }}
-.card-body  {{ font-size: 18px; line-height: 1.5; color: {INK_SOFT}; margin: 0 0 0.9rem; }}
-.small-note {{ font-size: 14.5px; color: {MUTED}; }}
+.hero-sub   {{ font-size: 21.5px; line-height: 1.6; color: {INK_SOFT}; margin: 0 0 2rem; max-width: 54ch; }}
+.section-title {{ font-size: 24px; font-weight: 600; letter-spacing: -0.014em; margin: 0 0 0.15rem; }}
+.section-note  {{ font-size: 17px; color: {MUTED}; margin: 0 0 1.2rem; }}
+.card-title {{ font-size: 27px; font-weight: 600; letter-spacing: -0.012em; margin: 0.5rem 0 0.4rem; }}
+.card-body  {{ font-size: 20px; line-height: 1.5; color: {INK_SOFT}; margin: 0 0 0.9rem; }}
+.small-note {{ font-size: 16.5px; color: {MUTED}; }}
 .rule {{ height: 1px; background: {RULE}; margin: 2.2rem 0; }}
 
 /* metric card */
 .perf {{ border: 1px solid {RULE}; border-radius: 14px; padding: 2rem 2.1rem; background: {PANEL}; }}
 .perf .n  {{ font-size: 60px; font-weight: 700; letter-spacing: -0.035em; line-height: 1; }}
 .perf .of {{ font-size: 19px; color: {MUTED}; margin-left: 0.6rem; }}
-.perf .h  {{ font-size: 22px; font-weight: 600; letter-spacing: -0.014em; margin: 0.85rem 0 0.5rem; }}
-.perf .b  {{ font-size: 17px; line-height: 1.55; color: {INK_SOFT}; margin: 0; }}
-.perf .fine {{ font-size: 14.5px; line-height: 1.5; color: {MUTED};
+.perf .h  {{ font-size: 24px; font-weight: 600; letter-spacing: -0.014em; margin: 0.85rem 0 0.5rem; }}
+.perf .b  {{ font-size: 19px; line-height: 1.55; color: {INK_SOFT}; margin: 0; }}
+.perf .fine {{ font-size: 16.5px; line-height: 1.5; color: {MUTED};
                margin-top: 1.3rem; padding-top: 1.2rem; border-top: 1px solid {RULE}; }}
 
 /* step rail */
 .rail {{ display: flex; gap: 2rem; align-items: center; padding: 0.9rem 0 1rem;
          border-bottom: 1px solid {RULE}; margin-bottom: 2.2rem; flex-wrap: wrap; }}
-.rail .s {{ display: flex; align-items: center; gap: 0.55rem; font-size: 15px; color: {MUTED}; }}
+.rail .s {{ display: flex; align-items: center; gap: 0.55rem; font-size: 17px; color: {MUTED}; }}
 .rail .s.on {{ color: {INK}; font-weight: 600; }}
 .rail .b {{ width: 23px; height: 23px; border-radius: 50%; display: flex;
             align-items: center; justify-content: center; font-size: 13px; font-weight: 700;
@@ -146,10 +171,10 @@ div[data-testid="stVerticalBlockBorderWrapper"] {{
 .rev {{ border: 1px solid {RULE}; border-radius: 14px; padding: 1.2rem 1.4rem;
         display: flex; gap: 1.1rem; margin-bottom: 0.7rem; }}
 .rev .stripe {{ width: 4px; border-radius: 2px; flex-shrink: 0; }}
-.rev .tag  {{ font-size: 13px; font-weight: 700; letter-spacing: 0.07em; }}
-.rev .meta {{ font-size: 14px; color: {MUTED}; }}
-.rev .body {{ font-size: 17px; line-height: 1.55; margin: 0.5rem 0 0.6rem; }}
-.rev .sum  {{ font-size: 15.5px; color: {INK_SOFT}; padding-left: 0.85rem;
+.rev .tag  {{ font-size: 14.5px; font-weight: 700; letter-spacing: 0.07em; }}
+.rev .meta {{ font-size: 16px; color: {MUTED}; }}
+.rev .body {{ font-size: 19px; line-height: 1.55; margin: 0.5rem 0 0.6rem; }}
+.rev .sum  {{ font-size: 17.5px; color: {INK_SOFT}; padding-left: 0.85rem;
               border-left: 2px solid {RULE}; }}
 
 /* ---------- rotating text ---------- */

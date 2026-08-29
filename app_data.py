@@ -164,8 +164,25 @@ def split_multi(series: pd.Series) -> list[str]:
     return out
 
 
-def random_key() -> str:
-    return random.choice(list(available().keys()))
+def random_key(exclude: str | None = None) -> str:
+    """
+    Draw a dataset at random for the "Surprise me" button.
+
+    Two things stop it feeling stuck on one dataset:
+
+      A FRESH SOURCE OF RANDOMNESS. random.choice() draws from a generator that
+      lives in the running process. Streamlit re-runs this script constantly and
+      the server can restart underneath it, so that generator's state is not
+      something we control. SystemRandom asks the operating system for entropy
+      each time instead, which cannot get into a repeating state.
+
+      NEVER THE ONE YOU JUST SAW. Even a perfect coin repeats. Excluding the
+      dataset currently open means a second click always lands somewhere new,
+      which is the whole point of pressing the button twice.
+    """
+    keys = list(available().keys())
+    pool = [k for k in keys if k != exclude] or keys
+    return random.SystemRandom().choice(pool)
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +199,18 @@ def apply_filters(df, sentiments, topics, search, rating_range) -> pd.DataFrame:
         lo, hi = rating_range
         out = out[out["rating"].between(lo, hi) | out["rating"].isna()]
     return out
+
+
+def apply_focus(df, kind: str, value: str) -> pd.DataFrame:
+    """
+    Narrow to the reviews carrying one topic or one keyword.
+
+    Matching is plain substring, not a pattern, because topics and keywords come
+    from the data and can contain brackets, plus signs and other characters that
+    a regular expression would read as instructions rather than text.
+    """
+    column = "categories" if kind == "topic" else "keywords"
+    return df[df[column].str.contains(value, case=False, na=False, regex=False)]
 
 
 def sentiment_share(df) -> dict[str, float]:
@@ -214,25 +243,45 @@ def keyword_counts(df, limit=10) -> pd.DataFrame:
     return pd.DataFrame(common.most_common(limit), columns=["keyword", "n"])
 
 
-def rating_effect(df, limit=8) -> pd.DataFrame:
+def rating_effect(df, limit=8, min_n=25):
     """
-    Average rating when a topic is mentioned, against the overall average.
+    Which topics genuinely move the customer's own rating.
 
-    The ratings were set by customers, not by us — so this is the one view on
-    the dashboard that checks the model's reading of the text against something
-    independent of it. Only possible where the dataset carries a rating.
+    Two things make this honest rather than decorative:
+
+      COMPARED AGAINST NON-MENTIONS, not the overall average. The overall
+      average includes the topic's own reviews, so a large topic is partly
+      compared against itself and its effect looks smaller than it is.
+
+      NOISE FILTERED OUT. A difference of a tenth of a star across a few
+      hundred reviews is not a finding, it is sampling wobble. Each topic's
+      difference is kept only if it clears roughly two standard errors — the
+      usual bar for "unlikely to be chance". On a dataset where almost everyone
+      gave five stars, nothing clears it, and the right answer is to say so
+      rather than draw eight bars of nothing.
     """
-    if df["rating"].isna().all():
-        return pd.DataFrame(columns=["topic", "delta", "n"])
-    baseline = df["rating"].mean()
+    rated = df[df["rating"].notna()]
+    if len(rated) < min_n * 2:
+        return pd.DataFrame(columns=["topic", "delta", "n", "se"])
+
     rows = []
-    for topic in set(split_multi(df["categories"])):
-        hit = df[df["categories"].str.contains(topic, case=False, na=False, regex=False)]
-        if len(hit) < 10 or hit["rating"].isna().all():
+    for topic in set(split_multi(rated["categories"])):
+        mask = rated["categories"].str.contains(topic, case=False, na=False, regex=False)
+        hit, rest = rated[mask], rated[~mask]
+        if len(hit) < min_n or len(rest) < min_n:
             continue
-        rows.append({"topic": topic, "delta": hit["rating"].mean() - baseline, "n": len(hit)})
+
+        delta = hit["rating"].mean() - rest["rating"].mean()
+        # standard error of the difference between two means
+        se = float(((hit["rating"].var() / len(hit)) + (rest["rating"].var() / len(rest))) ** 0.5)
+        if se <= 0 or abs(delta) < 2 * se:
+            continue
+
+        rows.append({"topic": topic, "delta": float(delta), "n": len(hit), "se": se})
+
     if not rows:
-        return pd.DataFrame(columns=["topic", "delta", "n"])
-    out = pd.DataFrame(rows).reindex(
-        pd.DataFrame(rows)["delta"].abs().sort_values(ascending=False).index)
-    return out.head(limit).sort_values("delta").reset_index(drop=True)
+        return pd.DataFrame(columns=["topic", "delta", "n", "se"])
+
+    out = pd.DataFrame(rows)
+    out = out.reindex(out["delta"].abs().sort_values(ascending=False).index).head(limit)
+    return out.sort_values("delta").reset_index(drop=True)
