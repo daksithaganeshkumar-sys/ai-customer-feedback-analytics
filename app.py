@@ -38,22 +38,14 @@ st.set_page_config(
 # st.html injects raw HTML without a markdown pass — see app_style.css()
 st.html(css())
 
-# Two different journeys, so two different step rails.
-#
-# An uploaded file really does get checked and really does need its topic list
-# confirmed, so it walks all five. A prepared dataset has already been through
-# both — months ago, offline — so showing it those steps as "skipped" makes a
-# finished job look broken. It gets a rail that describes what actually happens.
-UPLOAD_STEPS = [("choose", "Choose data"), ("check", "Check it"),
-                ("topics", "Confirm topics"), ("run", "Analyze"), ("dashboard", "Dashboard")]
-
-PREPARED_STEPS = [("choose", "Choose data"), ("run", "Open it"), ("dashboard", "Dashboard")]
+STEPS = [("choose", "Choose data"), ("check", "Check it"),
+         ("topics", "Confirm topics"), ("run", "Analyze"), ("dashboard", "Dashboard")]
 
 
 # One step back from each screen. The dashboard goes back to the dataset picker
 # whichever way you reached it, because that is the choice you'd want to change.
 PREVIOUS = {"why": "landing", "choose": "why", "check": "choose",
-            "topics": "check", "run": "topics", "dashboard": "choose"}
+            "topics": "check", "run": "topics", "dashboard": "topics"}
 
 ROTATING = [
     "Transform thousands of customer survey responses into actionable, AI powered summaries",
@@ -115,7 +107,7 @@ def back_link():
     # The waiting screen sits in two different paths, so where "back" goes
     # depends on which one you're in.
     if st.session_state.step == "run":
-        prev = "choose" if st.session_state.dataset else "topics"
+        prev = "topics"
     if prev and st.button("← Back", type="tertiary", key=f"back_{st.session_state.step}"):
         go(prev)
 
@@ -138,11 +130,10 @@ def header(right: str = "NO API KEY REQUIRED"):
 
 def rail(active: str):
     """The step indicator. Steps before the active one show a tick."""
-    steps = UPLOAD_STEPS if st.session_state.upload is not None else PREPARED_STEPS
-    keys = [k for k, _ in steps]
+    keys = [k for k, _ in STEPS]
     idx = keys.index(active) if active in keys else 0
     out = ["<div class='rail'>"]
-    for i, (k, label) in enumerate(steps):
+    for i, (k, label) in enumerate(STEPS):
         cls = "on" if i == idx else ("done" if i < idx else "")
         mark = "✓" if i < idx else str(i + 1)
         out.append(f"<div class='s {cls}'><div class='b'>{mark}</div>{label}</div>")
@@ -172,7 +163,7 @@ def screen_landing():
     st.markdown("<div style='height:2.2rem'></div>", unsafe_allow_html=True)
     _, mid, _ = st.columns([2, 1, 2])
     with mid:
-        if st.button("Get Started", use_container_width=True):
+        if st.button("Get Started", type="primary", use_container_width=True):
             go("why")
 
 
@@ -191,7 +182,7 @@ def screen_why():
                     "response for sentiment, topics, keywords, and a concise summary—then "
                     "explore the results in a filterable analytics dashboard.</p>",
                     unsafe_allow_html=True)
-        if st.button("Analyze now"):
+        if st.button("Analyze now", type="primary"):
             go("choose")
 
     with right:
@@ -254,10 +245,10 @@ def screen_choose():
                               label_visibility="collapsed")
         st.markdown(f"<p class='small-note'>{len(sets)} datasets · {total:,} reviews</p>",
                     unsafe_allow_html=True)
-        if st.button("Open dataset", use_container_width=True, disabled=choice is None):
+        if st.button("Open dataset", type="primary", use_container_width=True, disabled=choice is None):
             st.session_state.dataset = choice
             st.session_state.focus = None
-            go("run")
+            go("check")
 
     with c2, st.container(border=True):
         st.markdown("<div class='card-title'>Pick one for me</div>"
@@ -271,7 +262,7 @@ def screen_choose():
         if st.button("Surprise me", type="secondary", use_container_width=True):
             st.session_state.dataset = D.random_key(exclude=st.session_state.dataset)
             st.session_state.focus = None
-            go("run")
+            go("check")
 
     with c3, st.container(border=True):
         st.markdown("<div class='card-title'>Upload your own</div>"
@@ -280,13 +271,97 @@ def screen_choose():
         up = st.file_uploader("Upload", type=["csv", "xlsx"], label_visibility="collapsed")
         if up is not None:
             st.session_state.upload = up
+            st.session_state.dataset = None   # an upload is not one of the six
             go("check")
 
 
 # ---------------------------------------------------------------------------
 # screens 3-5 — the upload path
 # ---------------------------------------------------------------------------
+def stat(label: str, value: str, note: str = "") -> str:
+    return (f"<div><div class='eyebrow' style='margin-bottom:.3rem;'>{label}</div>"
+            f"<div style='font-size:31px;font-weight:700;letter-spacing:-.02em;'>{value}</div>"
+            + (f"<div class='small-note'>{note}</div>" if note else "") + "</div>")
+
+
 def screen_check():
+    """
+    Step 2. What the file turned out to contain.
+
+    For a prepared dataset every number here is measured from the file when the
+    screen opens — see app_data.file_stats(). These checks are not a formality
+    put on for show: four of the nine datasets originally considered were thrown
+    out at this stage, and the counts below are the same ones that decided it.
+    """
+    key = st.session_state.dataset
+    if st.session_state.upload is not None or key is None:
+        return screen_check_upload()
+
+    spec = D.DATASETS[key]
+    st.session_state.opened = None
+    header(spec["label"])
+    rail("check")
+    f = D.file_stats(key)
+
+    st.markdown("<h1 class='hero-title' style='font-size:38px;'>Checked the file</h1>"
+                f"<p class='hero-sub'>Every figure on this page was measured from "
+                f"{html.escape(spec['label'])} just now, not written down in advance.</p>",
+                unsafe_allow_html=True)
+
+    with st.container(border=True):
+        cols = st.columns(4)
+        stats = [("Rows in file", f"{f['rows']:,}", ""),
+                 ("Usable", f"{f['kept']:,}",
+                  f"{f['rejected']:,} rejected at validation" if f["rejected"] else "all rows passed"),
+                 ("Blank", f"{f['blank']:,}", "no text to read"),
+                 ("Typical length", f"{f['chars']:,}", "characters per review")]
+        for c, (a, b, n) in zip(cols, stats):
+            with c:
+                st.markdown(stat(a, b, n), unsafe_allow_html=True)
+
+    st.markdown("<div style='height:1.2rem'></div>", unsafe_allow_html=True)
+
+    left, right = st.columns(2, gap="medium")
+    with left, st.container(border=True):
+        st.markdown("<div class='section-title'>Columns it found</div>"
+                    "<p class='section-note'>Which column plays which part</p>",
+                    unsafe_allow_html=True)
+        rows = [("The review text", f["text_col"]),
+                ("Customer's own rating", f["rating_col"] or "none in this file"),
+                ("Something to slice by", f["segment_col"] or "none in this file")]
+        for label, col in rows:
+            st.markdown(
+                f"<div style='display:flex;justify-content:space-between;padding:.55rem 0;"
+                f"border-bottom:1px solid {RULE};'><span style='font-size:16px;'>{label}</span>"
+                f"<span style='font-size:16px;font-weight:600;'>{html.escape(str(col))}</span>"
+                f"</div>", unsafe_allow_html=True)
+        st.markdown(f"<p class='small-note' style='margin-top:.9rem;'>"
+                    f"{len(f['columns'])} columns in total.</p>", unsafe_allow_html=True)
+
+    with right, st.container(border=True):
+        st.markdown("<div class='section-title'>What this gate is for</div>",
+                    unsafe_allow_html=True)
+        st.markdown(
+            "<p class='card-body' style='font-size:17px;'>A file gets rejected here if the "
+            "reviews are too short to carry meaning, if the text has already been stripped of "
+            "capitals and stopwords by someone else, or if there is no free-text column at "
+            "all.</p>"
+            "<p class='card-body' style='font-size:17px;margin-bottom:0;'>Nine datasets were "
+            "considered for this tool. Four failed this gate and were dropped.</p>",
+            unsafe_allow_html=True)
+
+    st.markdown("<div style='height:1.4rem'></div>", unsafe_allow_html=True)
+    a, b = st.columns([1, 3])
+    with a:
+        if st.button("Next: the topics", type="primary", use_container_width=True):
+            go("topics")
+    with b:
+        if st.button("Choose a different dataset", type="secondary"):
+            go("choose")
+
+
+def screen_check_upload():
+    """The same step for a file you uploaded, which this deployment can't label."""
     header(getattr(st.session_state.upload, "name", ""))
     rail("check")
     st.markdown("<h1 class='hero-title' style='font-size:38px;'>Checked your file</h1>",
@@ -306,6 +381,71 @@ def screen_check():
             icon="ℹ️")
     if st.button("Back to the datasets", type="secondary"):
         go("choose")
+
+
+def screen_topics():
+    """
+    Step 3. The topic list this dataset was labeled against.
+
+    For an upload you would be approving a proposed list here. For a prepared
+    dataset that approval already happened, so the screen shows the list as it
+    was locked, with how many reviews ended up under each one.
+    """
+    key = st.session_state.dataset
+    if st.session_state.upload is not None or key is None:
+        return screen_check_upload()
+
+    spec = D.DATASETS[key]
+    header(spec["label"])
+    rail("topics")
+    counts, uncategorised = D.topic_coverage(key)
+    total = D.file_stats(key)["kept"]
+    rate = uncategorised / total if total else 0
+
+    st.markdown("<h1 class='hero-title' style='font-size:38px;'>The topics, locked</h1>"
+                f"<p class='hero-sub'>Claude read a 200-review sample across every rating and "
+                f"proposed these {len(counts)}. Once approved the list was fixed, and all "
+                f"{total:,} reviews were sorted against it — which is what makes the counts "
+                f"below comparable to each other.</p>", unsafe_allow_html=True)
+
+    left, right = st.columns([1.5, 1], gap="medium")
+    with left, st.container(border=True):
+        st.markdown("<div class='section-title'>Where the reviews landed</div>"
+                    "<p class='section-note'>Reviews can carry more than one topic</p>",
+                    unsafe_allow_html=True)
+        top = max([n for _, n in counts] + [1])
+        for name, n in counts:
+            st.markdown(
+                f"<div style='display:flex;align-items:center;gap:.9rem;margin-bottom:.6rem;'>"
+                f"<span style='font-size:16px;width:210px;flex-shrink:0;'>"
+                f"{html.escape(name)}</span>"
+                f"<div style='height:14px;border-radius:999px;background:{INK};"
+                f"width:{n/top*68:.1f}%;'></div>"
+                f"<span style='font-size:15px;color:{MUTED};'>{n:,}</span></div>",
+                unsafe_allow_html=True)
+
+    with right, st.container(border=True):
+        st.markdown("<div class='section-title'>Matched no topic</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div style='font-size:46px;font-weight:700;letter-spacing:-.03em;'>"
+            f"{rate*100:.1f}%</div>"
+            f"<p class='small-note'>{uncategorised:,} of {total:,} reviews</p>"
+            "<p class='card-body' style='font-size:17px;margin-top:1rem;'>This number is "
+            "reported rather than hidden. A low rate means the list fits the data. A high "
+            "rate on long reviews means a real theme is missing, and the list needs another "
+            "pass.</p>"
+            "<p class='card-body' style='font-size:17px;margin-bottom:0;'>Most uncategorised "
+            "rows here are very short — &ldquo;Great!&rdquo; carries no topic to find.</p>",
+            unsafe_allow_html=True)
+
+    st.markdown("<div style='height:1.4rem'></div>", unsafe_allow_html=True)
+    a, b = st.columns([1, 3])
+    with a:
+        if st.button("Open the dashboard", type="primary", use_container_width=True):
+            go("run")
+    with b:
+        if st.button("Back to the file check", type="secondary"):
+            go("check")
 
 
 def screen_run():
@@ -582,7 +722,7 @@ def screen_dashboard():
                                file_name=f"{key}_labeled_filtered.csv", mime="text/csv",
                                type="secondary", use_container_width=True)
         with b:
-            if st.button("Analyze another dataset", use_container_width=True):
+            if st.button("Analyze another dataset", type="primary", use_container_width=True):
                 st.session_state.focus = None
                 go("choose")
         with c:
@@ -600,7 +740,7 @@ SCREENS = {
     "why":       screen_why,
     "choose":    screen_choose,
     "check":     screen_check,
-    "topics":    screen_check,
+    "topics":    screen_topics,
     "run":       screen_run,
     "dashboard": screen_dashboard,
 }

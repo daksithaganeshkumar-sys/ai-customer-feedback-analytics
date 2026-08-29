@@ -78,6 +78,18 @@ p, li, label, span, div {{ color: {INK}; }}
 }}
 .stButton > button:hover {{ background: {INK}; color: #FFFFFF; opacity: .86; }}
 .stButton > button:focus {{ box-shadow: 0 0 0 3px rgba(21,23,26,.18) !important; color: #FFFFFF; }}
+/* Streamlit tags an unstyled button kind="secondary", not kind="primary", so a
+   rule written only against the base class loses to the secondary rule below
+   and every main action button comes out white. The main ones therefore pass
+   type="primary" and are painted black here, explicitly. */
+.stButton > button[kind="primary"] {{
+  background: {INK} !important; color: #FFFFFF !important; border: none !important;
+}}
+.stButton > button[kind="primary"]:hover {{
+  background: {INK} !important; color: #FFFFFF !important; opacity: .86;
+}}
+.stButton > button[kind="primary"] p {{ color: #FFFFFF !important; }}
+
 .stButton > button[kind="secondary"] {{
   background: #FFFFFF; color: {INK}; border: 1px solid {RULE_STRONG};
 }}

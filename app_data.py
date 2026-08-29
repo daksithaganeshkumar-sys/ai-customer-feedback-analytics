@@ -156,6 +156,45 @@ def taxonomy(key: str) -> list[str]:
     return sorted(set(split_multi(load(key)["categories"])))
 
 
+@st.cache_data(show_spinner=False)
+def file_stats(key: str) -> dict:
+    """
+    What the file check screen reports — every figure measured here and now.
+
+    Nothing on that screen is written down in advance. The row counts, the blank
+    and duplicate counts and the column mapping are all computed from the file
+    on disk when you open it, so the screen cannot drift out of date with the
+    data the way a hand-written description would.
+    """
+    spec = DATASETS[key]
+    raw = pd.read_csv(spec["file"], low_memory=False)
+    text = raw[spec["text"]].fillna("").astype(str).str.strip()
+
+    kept = load(key)
+    return {
+        "rows": len(raw),
+        "kept": len(kept),
+        "rejected": len(raw) - len(kept),
+        "blank": int((text == "").sum()),
+        "duplicate": int(text[text != ""].duplicated().sum()),
+        "columns": list(raw.columns),
+        "text_col": spec["text"],
+        "rating_col": spec["rating"],
+        "segment_col": spec["segment"],
+        "chars": int(text[text != ""].str.len().median()) if (text != "").any() else 0,
+    }
+
+
+@st.cache_data(show_spinner=False)
+def topic_coverage(key: str) -> tuple[list[tuple[str, int]], int]:
+    """Each locked topic with its review count, plus how many matched none of them."""
+    df = load(key)
+    counts = [(t, int(df["categories"].str.contains(t, case=False, na=False, regex=False).sum()))
+              for t in taxonomy(key)]
+    uncategorised = int((df["categories"].str.strip() == "").sum())
+    return sorted(counts, key=lambda r: -r[1]), uncategorised
+
+
 def split_multi(series: pd.Series) -> list[str]:
     """Pipe-joined cells back into a flat list: 'Delays | Staff' -> ['Delays','Staff']."""
     out: list[str] = []
