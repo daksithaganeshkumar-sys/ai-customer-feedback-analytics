@@ -7,6 +7,7 @@ by create_evaluation_sample.py on review_id and reports:
 
   SENTIMENT (single-label):
     - accuracy
+    - Cohen's kappa, unweighted and linear-weighted
     - per-class precision / recall / F1 (positive, negative, mixed)
     - macro and weighted F1
     - confusion matrix
@@ -34,15 +35,37 @@ import sys
 try:
     from sklearn.metrics import (
         accuracy_score, precision_recall_fscore_support,
-        classification_report, confusion_matrix,
+        classification_report, confusion_matrix, cohen_kappa_score,
     )
     from sklearn.preprocessing import MultiLabelBinarizer
 except ImportError:
     sys.exit("scikit-learn is required. Install with:  pip install -r requirements.txt")
 
 SENTIMENTS = ["positive", "negative", "mixed"]
+
+# The same three labels in ORDINAL order, for weighted kappa only. Weighted
+# kappa penalises a disagreement by how far apart the two labels are, which
+# requires knowing that "mixed" sits between the other two. Getting this order
+# wrong silently produces a meaningless number.
+SENTIMENT_SCALE = ["negative", "mixed", "positive"]
+
 LABELS_CSV = "human_labeling_sample.csv"
 PREDS_CSV = "evaluation_predictions.csv"
+
+
+def kappa_band(k):
+    """Standard interpretation bands for Cohen's kappa (Landis & Koch, 1977)."""
+    if k < 0.00:
+        return "worse than chance"
+    if k < 0.21:
+        return "slight"
+    if k < 0.41:
+        return "fair"
+    if k < 0.61:
+        return "moderate"
+    if k < 0.81:
+        return "substantial"
+    return "almost perfect"
 
 
 def load(path):
@@ -85,9 +108,23 @@ def main():
     weighted = precision_recall_fscore_support(
         y_true, y_pred, labels=SENTIMENTS, average="weighted", zero_division=0)
 
+    # Cohen's kappa: agreement corrected for what chance alone would produce.
+    # Raw accuracy is misleading on skewed data — if 70% of reviews are negative,
+    # always answering "negative" scores 0.70 accuracy and 0.00 kappa.
+    kappa = cohen_kappa_score(y_true, y_pred, labels=SENTIMENTS)
+    kappa_w = cohen_kappa_score(
+        y_true, y_pred, labels=SENTIMENT_SCALE, weights="linear")
+
     emit("## Sentiment (single-label)\n")
     emit(f"- Accuracy: **{acc:.3f}**")
+    emit(f"- **Cohen's kappa: {kappa:.3f}** ({kappa_band(kappa)})")
+    emit(f"- Linear-weighted kappa: **{kappa_w:.3f}** ({kappa_band(kappa_w)})")
     emit(f"- Macro F1: **{macro[2]:.3f}**  ·  Weighted F1: **{weighted[2]:.3f}**\n")
+    emit("Kappa is agreement above what chance would produce given how often each "
+         "label is used, so it cannot be inflated by a skewed class distribution "
+         "the way accuracy can. The weighted variant treats the three labels as a "
+         "scale, so mistaking `mixed` for `positive` costs less than mistaking "
+         "`positive` for `negative`.\n")
     emit("| class | precision | recall | F1 |")
     emit("|---|---|---|---|")
     for i, c in enumerate(SENTIMENTS):
